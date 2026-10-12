@@ -99,6 +99,6 @@ uv run dzmm2sillytavern convert chat.json -o - --char-name "角色名" --user-na
 uv run --locked python -m unittest discover -s tests -v
 ```
 
-回归覆盖真实 CLI 双向调用、系统/用户/助手消息、分支顺序、swipe 选择与时间、旧式日期、Unicode 行分隔符、非法树结构，以及覆盖/链接别名保护。
+回归覆盖真实 CLI 双向调用、系统/用户/助手消息、完整分支 swipe 投影、分支长度/角色差异、名称引号与特殊字符、旧式日期、Unicode 行分隔符、非法树结构，以及覆盖/链接别名保护。
 
 SillyTavern 字段和旧式日期参考：[聊天导入实现](https://github.com/SillyTavern/SillyTavern/blob/release/src/endpoints/chats.js)、[时间解析实现](https://github.com/SillyTavern/SillyTavern/blob/release/public/scripts/utils.js)。
