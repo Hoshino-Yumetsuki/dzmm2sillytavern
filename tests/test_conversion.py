@@ -149,8 +149,81 @@ class ConversionTests(unittest.TestCase):
         )
         self.assertNotIn("\x1b", forward.stdout)
 
+    def test_active_path_preserves_order_and_sibling_swipes(self):
+        result = convert_text(
+            json.dumps(dzmm_chat()),
+            char_name="角色",
+            user_name="读者",
+            model="override",
+        )
+        messages = [json.loads(line) for line in result.text.splitlines()][1:]
+        self.assertEqual(
+            [m["mes"] for m in messages], ["问题\n第二行", "当前答案", "继续"]
+        )
+        self.assertEqual(messages[1]["swipes"], ["另一个答案", "当前答案"])
+        self.assertEqual(messages[1]["swipe_id"], 1)
+        self.assertEqual(messages[1]["extra"]["model"], "override")
+        self.assertEqual(messages[2].get("swipes", [messages[2]["mes"]]), ["继续"])
+        self.assertEqual(result.swipe_count, 1)
 
+    def test_inactive_longer_and_mixed_role_branches_do_not_add_messages(self):
+        data = dzmm_chat()
+        data["messages"][1]["messages"].append(
+            {"role": "system", "content": "支线系统", "createAt": 3100}
+        )
+        data["messages"][3]["messages"] = [
+            {"role": "assistant", "content": "重复文本", "createAt": 4000},
+            {"role": "assistant", "content": "重复文本", "createAt": 5000},
+        ]
+        data["chat"]["chunks"][3]["children"] = ["tail-a", "tail-b"]
+        for index, chunk_id in enumerate(("tail-a", "tail-b")):
+            data["chat"]["chunks"].append(
+                {"id": chunk_id, "parent": "hidden", "children": [], "active": index == 0}
+            )
+            data["messages"].append({"chunk_id": chunk_id, "messages": [
+                {"role": "assistant", "content": chunk_id, "createAt": 6000 + index},
+            ]})
+        result = self.run_cli("convert", "-", text=json.dumps(data))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(line) for line in result.stdout.split("\n") if line][1:]
+        self.assertEqual([row["mes"] for row in rows],
+                         ["问题\n第二行", "当前答案", "继续"])
+        self.assertEqual([row["is_user"] for row in rows], [True, False, True])
+        self.assertEqual([row.get("swipes", [row["mes"]]) for row in rows],
+                         [["问题\n第二行"], ["另一个答案", "当前答案"], ["继续"]])
+        self.assertEqual(rows[1]["swipe_id"], 1)
+        self.assertEqual([info["send_date"] for info in rows[1]["swipe_info"]],
+                         ["1970-01-01T00:00:03.000Z", "1970-01-01T00:00:01.000Z"])
+        # The retained alternatives remain selectable through a roundtrip,
+        # without appending the discarded branch's continuation.
+        rows[1]["swipe_id"] = 0
+        rows[1]["mes"] = rows[1]["swipes"][0]
+        back = convert_text(convert_text(jsonl(rows)).text)
+        restored = [json.loads(line) for line in back.text.split("\n") if line][1:]
+        self.assertEqual([row["mes"] for row in restored],
+                         ["问题\n第二行", "另一个答案", "继续"])
+        self.assertEqual([row.get("swipes") for row in restored],
+                         [row.get("swipes") for row in rows])
 
+    def test_no_active_child_stops_at_root_without_synthetic_messages(self):
+        for root_messages in ([], [{"role": "user", "content": "根消息", "createAt": 1000}]):
+            with self.subTest(root_messages=root_messages):
+                data = dzmm_chat()
+                data["chat"]["chunks"][2]["active"] = False
+                data["messages"][0]["messages"] = root_messages
+                converted = convert_text(json.dumps(data))
+                rows = [json.loads(line) for line in converted.text.split("\n") if line][1:]
+                self.assertEqual([row["mes"] for row in rows],
+                                 [message["content"] for message in root_messages])
+
+    def test_source_empty_message_is_preserved_without_padding(self):
+        data = dzmm_chat()
+        data["messages"][2]["messages"][0]["content"] = ""
+        result = convert_text(json.dumps(data))
+        rows = [json.loads(line) for line in result.text.split("\n") if line][1:]
+        self.assertEqual([row["mes"] for row in rows], ["问题\n第二行", "", "继续"])
+        self.assertEqual(rows[1]["swipes"], ["另一个答案", ""])
+        self.assertEqual(rows[1]["swipe_id"], 1)
 
     def test_cli_requires_both_nonblank_names_in_both_directions(self):
         sources = [json.dumps(dzmm_chat()), jsonl([
