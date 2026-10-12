@@ -71,13 +71,13 @@ uv run dzmm2sillytavern convert chat.json -o - --char-name "角色名" --user-na
 
 采用仓库原有转换脚本使用的结构：顶层 `chatId`、`chat.chunks` 和 `messages`。chunk 使用 `id`、`parent`、`children`、`active` 建树；每组消息通过 `chunk_id` 关联，消息包含 `role`、`content`、`createAt`（整数毫秒）。支持 `user`、`assistant`、`system` 三种角色。
 
-- 消息位置按从根到该消息之前的消息总数计算，与 chunk 边界无关；不按时间戳重排。主线由根及 `active` 子节点确定。
-- 同一位置、同一角色的**所有分支消息**映射为同一条 ST 消息的 `swipes`，按 `children` 顺序深度优先收集；每条源消息只投影一次，不按文本去重。`swipe_id` 指向主线版本，同一位置有多种角色时先输出主线角色行。
-- 不关联后文：每条消息的 swipes 独立，不会同步切换后续消息；原始树的跨消息分支关联不再保留。
-- 主线没有对应消息的位置（分支更长或角色不同）使用空字符串作为选中 swipe，并给出提示；同一位置不同角色拆成独立行。空选中项使用该组首条分支消息的时间、名称和模型，并非原始主线消息。
+- 沿根节点及 `active` 子节点提取当前主线，输出主线中的全部消息；保持树和消息数组的原始顺序，不按时间戳重排。没有 active 子节点时停止。
+- 对每个活动 chunk 的第一条消息，收集兄弟 chunk 中同角色的第一条消息作为 `swipes`；顺序跟随父节点的 `children`，`swipe_id` 指向主线版本。
+- 非活动 chunk 的后续消息、更深层消息和首条角色不匹配的兄弟消息不投影，会报告未保留的消息数量；未知平台字段也会警告。
+- 不为未选分支新增消息行或合成空白 swipe，不按位置合并整棵树。源文件中真实存在的空消息仍会保留。
 - 重复节点、悬空引用、环、多根、多 active 子节点以及非法字段会报错。
 
-**ST 界面限制：** 输出使用标准 `swipes`、`swipe_id`、`swipe_info`，没有把分支藏在自定义元数据里。当前 ST 上游只允许末条非用户消息直接左右切换；历史助手消息可以在 swipe picker 中查看备选并创建分支，用户消息没有原生 swipe 按钮。这是 ST 的界面限制，不能仅通过 JSONL 字段解除；本工具仍保留用户消息的备选供往返转换或支持这些操作的扩展使用。参见 [ST 切换条件](https://github.com/SillyTavern/SillyTavern/blob/release/public/script.js) 与 [swipe picker](https://github.com/SillyTavern/SillyTavern/blob/release/public/scripts/swipe-picker.js)。
+**ST 界面限制：** 输出使用标准 `swipes`、`swipe_id`、`swipe_info`。当前 ST 上游只允许末条非用户消息直接左右切换；历史助手消息可以在 swipe picker 中查看备选并创建分支，用户消息没有原生 swipe 按钮。转换器不绕过这些限制，也不会为此添加空白消息或修改角色。参见 [ST 切换条件](https://github.com/SillyTavern/SillyTavern/blob/release/public/script.js) 与 [swipe picker](https://github.com/SillyTavern/SillyTavern/blob/release/public/scripts/swipe-picker.js)。
 
 ### SillyTavern JSONL
 
@@ -89,7 +89,7 @@ uv run dzmm2sillytavern convert chat.json -o - --char-name "角色名" --user-na
 - 无时区的时间按 UTC 解释；输出统一为 UTC，精度为毫秒。缺失消息时间使用 Unix epoch（`0`）并警告；缺失 swipe 时间沿用当前消息时间。已提供但无效的时间会报错。
 - 为支持本工具往返转换，DZMM 输出额外携带 `chat.user_name`、`chat.character_name`、消息 `name`/`model`；当前消息时间与选中 swipe 时间不同时，另存 `selectedAt`。
 
-**不是完整无损备份。** 不保留原始 UUID、平台/插件设置、附件、工具调用或推理扩展数据；不同角色拆行时会改变原始树结构。由于 ST swipe 不关联后文，反向转换不能恢复原始跨消息分支联动。仍应保存原始导出文件。
+**不是完整无损备份。** 不保留原始 UUID、未投影的非活动分支消息、平台/插件设置、附件、工具调用或推理扩展数据。反向转换不能恢复已丢弃的消息或原始跨消息分支关联。仍应保存原始导出文件。
 
 反向输出已通过本工具的往返验证；仓库未提供真实 DZMM 导入器或导入样本，**未验证 DZMM 平台直接导入兼容性**。上述附加字段用于本工具往返，不代表平台官方字段。
 
@@ -99,6 +99,6 @@ uv run dzmm2sillytavern convert chat.json -o - --char-name "角色名" --user-na
 uv run --locked python -m unittest discover -s tests -v
 ```
 
-回归覆盖真实 CLI 双向调用、系统/用户/助手消息、完整分支 swipe 投影、分支长度/角色差异、名称引号与特殊字符、旧式日期、Unicode 行分隔符、非法树结构，以及覆盖/链接别名保护。
+回归覆盖真实 CLI 双向调用、系统/用户/助手消息、活动主线与兄弟 swipes、长分支和角色差异不生成空白消息、真实空消息保留、名称引号与特殊字符、旧式日期、Unicode 行分隔符、非法树结构，以及覆盖/链接别名保护。
 
 SillyTavern 字段和旧式日期参考：[聊天导入实现](https://github.com/SillyTavern/SillyTavern/blob/release/src/endpoints/chats.js)、[时间解析实现](https://github.com/SillyTavern/SillyTavern/blob/release/public/scripts/utils.js)。
