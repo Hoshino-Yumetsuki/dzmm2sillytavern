@@ -421,39 +421,45 @@ def _read_dzmm(data, warnings):
             )
         lookup[chunk_id] = parsed
         metadata_dropped |= bool(set(entry) - {"chunk_id", "messages"})
-    path = []
-    current = roots[0] if roots else None
-    while current is not None:
-        path.append(current)
-        current = next(
-            (child for child in chunks[current]["children"] if chunks[child]["active"]),
-            None,
+    # Position counts messages from the root, not chunks: empty chunks and
+    # different chunk boundaries must not shift otherwise corresponding swipes.
+    slots = []
+    pending = [(roots[0], 0, True)] if roots else []
+    while pending:
+        chunk_id, position, on_active_path = pending.pop()
+        for message in lookup.get(chunk_id, []):
+            if position == len(slots):
+                slots.append({})
+            role = message["role"]
+            variants, selected = slots[position].get(role, ([], None))
+            if on_active_path:
+                selected = len(variants)
+            variants.append(message)
+            slots[position][role] = (variants, selected)
+            position += 1
+        pending.extend(
+            (child, position, on_active_path and chunks[child]["active"])
+            for child in reversed(chunks[chunk_id]["children"])
         )
-    projected = set()
+
     messages = []
-    for chunk_id in path:
-        for index, message in enumerate(lookup.get(chunk_id, [])):
-            projected.add((chunk_id, index))
-            variants = [message]
-            selected = 0
-            parent = chunks[chunk_id]["parent"]
-            if index == 0 and parent is not None:
-                variants = []
-                for sibling in chunks[parent]["children"]:
-                    sibling_messages = lookup.get(sibling, [])
-                    if (
-                        sibling_messages
-                        and sibling_messages[0]["role"] == message["role"]
-                    ):
-                        if sibling == chunk_id:
-                            selected = len(variants)
-                        variants.append(sibling_messages[0])
-                        projected.add((sibling, 0))
+    padded = 0
+    for slot in slots:
+        # Keep the active role first; other roles at this position get their own
+        # row so switching text never changes a user message into an assistant.
+        for variants, selected in sorted(slot.values(), key=lambda group: group[1] is None):
+            if selected is None:
+                first = variants[0]
+                selected = len(variants)
+                variants.append({
+                    "role": first["role"], "content": "", "createAt": first["createAt"],
+                    "name": first["name"], "model": first["model"],
+                })
+                padded += 1
             messages.append((variants, selected))
-    dropped = sum(len(group) for group in lookup.values()) - len(projected)
-    if dropped:
+    if padded:
         warnings.append(
-            f"DZMM 非活动分支有 {dropped} 条消息无法投影到当前路径/swipes，未保留。"
+            f"主线无对应消息的 {padded} 个位置已补空选中项；全部分支文本保留为独立 swipes，不联动后文。"
         )
     if metadata_dropped:
         warnings.append("DZMM 平台元数据不在核心转换范围内，未保留。")
@@ -601,7 +607,7 @@ def convert_text(
     user_name: str | None = None,
     model: str | None = None,
 ) -> ConversionResult:
-    """转换核心消息及 swipes；不承诺保留平台/插件元数据或非活动子树。"""
+    """转换全部消息为独立 swipes；不保留分支关联或平台/插件元数据。"""
     _string(text, "输入")
     if source_format not in ("auto", "dzmm", "sillytavern"):
         raise ConversionError("source_format: 必须是 auto、dzmm 或 sillytavern")
