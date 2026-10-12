@@ -17,7 +17,7 @@ uv run dzmm2sillytavern convert --help
 也可以安装为独立命令：
 
 ```sh
-uv tool install .
+uv tool install https://github.com/Hoshino-Yumetsuki/dzmm2sillytavern.git
 dzmm2sillytavern --version
 ```
 
