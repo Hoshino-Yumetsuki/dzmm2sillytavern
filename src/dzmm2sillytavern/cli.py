@@ -80,13 +80,19 @@ def _common_options(parser):
     )
 
 
+def _name(value):
+    if not value.strip():
+        raise argparse.ArgumentTypeError("名称不能为空或仅包含空白")
+    return value
+
+
 def _parser():
     parser = _Parser(
         prog="dzmm2sillytavern",
         add_help=False,
         allow_abbrev=False,
         description="在 DZMM JSON 与 SillyTavern JSONL 之间双向转换聊天记录。",
-        epilog="示例：dzmm2sillytavern convert chat.json -o chat.jsonl",
+        epilog='示例：dzmm2sillytavern convert chat.json --char-name "角色 A" --user-name "用户 B"',
     )
     parser._positionals.title = "命令"
     parser._optionals.title = "选项"
@@ -121,8 +127,14 @@ def _parser():
         choices=("dzmm", "sillytavern"),
         help="输出格式（默认转换为另一种格式）",
     )
-    command.add_argument("--char-name", metavar="NAME", help="覆盖角色名称")
-    command.add_argument("--user-name", metavar="NAME", help="覆盖用户名称")
+    command.add_argument(
+        "--char-name", metavar="NAME", required=True, type=_name,
+        help="角色名称（必填；含空格时用引号包裹）",
+    )
+    command.add_argument(
+        "--user-name", metavar="NAME", required=True, type=_name,
+        help="用户名称（必填；含空格时用引号包裹）",
+    )
     command.add_argument("--model", metavar="MODEL", help="覆盖模型名称")
     return parser
 

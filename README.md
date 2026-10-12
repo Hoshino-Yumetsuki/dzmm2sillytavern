@@ -25,22 +25,32 @@ dzmm2sillytavern --version
 
 ## 双向转换
 
+`--char-name` 和 `--user-name` 在双向转换中都必填，不能是空字符串或纯空白；shell 会把引号中的整段内容作为一个参数。名称原样保留，包括首尾空格，不会再次拆词或去除名称中的引号。
+
+```sh
+# 名称以 - 开头时使用 --选项="值" 形式
+uv run dzmm2sillytavern convert chat.json --char-name "夜之角色 A & [主线]" --user-name "读者 B"
+uv run dzmm2sillytavern convert chat.json --char-name="-角色" --user-name="用户;*?"
+```
+
 ```sh
 # DZMM → SillyTavern；默认生成 chat.sillytavern.jsonl
 uv run dzmm2sillytavern convert chat.json --char-name "角色名" --user-name "用户名"
 
 # SillyTavern → DZMM；默认生成 chat.dzmm.json
-uv run dzmm2sillytavern convert chat.jsonl
+uv run dzmm2sillytavern convert chat.jsonl --char-name "角色名" --user-name "用户名"
 
 # 显式指定格式和输出位置；不依赖文件扩展名识别
-uv run dzmm2sillytavern convert export.txt --from dzmm --to sillytavern -o result.jsonl
+uv run dzmm2sillytavern convert export.txt --from dzmm --to sillytavern -o result.jsonl --char-name "角色名" --user-name "用户名"
 
 # 标准输入/输出：- 表示管道；stdin 默认输出到 stdout
-uv run dzmm2sillytavern convert chat.json -o - | uv run dzmm2sillytavern convert - --to dzmm -o restored.json
+uv run dzmm2sillytavern convert chat.json -o - --char-name "角色名" --user-name "用户名" | uv run dzmm2sillytavern convert - --to dzmm -o restored.json --char-name "角色名" --user-name "用户名"
 ```
 
 `--to` 默认选择输入的另一种格式；指定相同的输入/输出格式会报错。
-名称优先使用命令行覆盖值，其次使用源文件中的名称；缺失时使用“用户”“角色”“系统”。`--model` 覆盖源模型名称，否则保留可用的源模型信息。
+命令行名称会原样写入输出；`--model` 覆盖源模型名称，否则保留可用的源模型信息。
+
+双引号内的 `$`、反引号和反斜杠仍可能被 shell 解释；需要字面量时使用单引号，或遵循 shell 转义规则。例如 `--char-name '角色 $5 "夜"' --user-name "读者 B"`。作为分组符的外层引号不会成为名称的一部分。
 
 ## 输出与安全
 
