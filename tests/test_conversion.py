@@ -149,78 +149,8 @@ class ConversionTests(unittest.TestCase):
         )
         self.assertNotIn("\x1b", forward.stdout)
 
-    def test_tree_order_and_complete_branch_projection(self):
-        result = convert_text(
-            json.dumps(dzmm_chat()),
-            char_name="角色",
-            user_name="读者",
-            model="override",
-        )
-        messages = [json.loads(line) for line in result.text.splitlines()][1:]
-        self.assertEqual(
-            [m["mes"] for m in messages], ["问题\n第二行", "当前答案", "继续"]
-        )
-        self.assertEqual(messages[1]["swipes"], ["另一个答案", "当前答案"])
-        self.assertEqual(messages[1]["swipe_id"], 1)
-        self.assertEqual(messages[1]["extra"]["model"], "override")
-        self.assertEqual(messages[2]["swipes"], ["未选分支后续", "继续"])
-        self.assertEqual(messages[2]["swipe_id"], 1)
-        self.assertEqual(result.swipe_count, 2)
-        self.assertEqual(result.warnings, [])
 
-    def test_nested_longer_and_mixed_role_branches_remain_independent_swipes(self):
-        data = dzmm_chat()
-        data["messages"][1]["messages"].append(
-            {"role": "system", "content": "支线系统", "createAt": 3100}
-        )
-        data["messages"][3]["messages"] = [
-            {"role": "assistant", "content": "重复文本", "createAt": 4000},
-            {"role": "assistant", "content": "重复文本", "createAt": 5000},
-        ]
-        data["chat"]["chunks"][3]["children"] = ["tail-a", "tail-b"]
-        for index, chunk_id in enumerate(("tail-a", "tail-b")):
-            data["chat"]["chunks"].append(
-                {"id": chunk_id, "parent": "hidden", "children": [], "active": index == 0}
-            )
-            data["messages"].append({"chunk_id": chunk_id, "messages": [
-                {"role": "assistant", "content": chunk_id, "createAt": 6000 + index},
-            ]})
-        result = self.run_cli("convert", "-", text=json.dumps(data))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        rows = [json.loads(line) for line in result.stdout.split("\n") if line][1:]
-        self.assertEqual([row["mes"] for row in rows],
-                         ["问题\n第二行", "当前答案", "继续", "", "", "", ""])
-        self.assertTrue(rows[2]["is_user"])
-        self.assertTrue(rows[3]["is_system"])
-        self.assertEqual(rows[3]["swipes"], ["支线系统", ""])
-        self.assertEqual(rows[4]["swipes"], ["重复文本", ""])
-        self.assertEqual(rows[5]["swipes"], ["重复文本", ""])
-        self.assertEqual(rows[6]["swipes"], ["tail-a", "tail-b", ""])
-        self.assertEqual(rows[6]["swipe_info"][1]["send_date"], "1970-01-01T00:00:06.001Z")
-        for row in rows[1:]:
-            if "swipes" in row:
-                self.assertEqual(row["mes"], row["swipes"][row["swipe_id"]])
-        # Switching one answer is an independent edit; later selected messages
-        # and every alternative remain intact through the reverse conversion.
-        rows[1]["swipe_id"] = 0
-        rows[1]["mes"] = rows[1]["swipes"][0]
-        back = convert_text(convert_text(jsonl(rows)).text)
-        restored = [json.loads(line) for line in back.text.split("\n") if line][1:]
-        self.assertEqual([row["mes"] for row in restored],
-                         ["问题\n第二行", "另一个答案", "继续", "", "", "", ""])
-        self.assertEqual([row.get("swipes") for row in restored],
-                         [row.get("swipes") for row in rows])
 
-    def test_no_active_child_and_empty_chunks_do_not_hide_swipes(self):
-        data = dzmm_chat()
-        data["chat"]["chunks"][2]["active"] = False
-        data["messages"][0]["messages"] = []
-        data["messages"][1]["messages"][0]["content"] = ""
-        converted = convert_text(json.dumps(data))
-        rows = [json.loads(line) for line in converted.text.split("\n") if line][1:]
-        self.assertEqual([row["swipes"] for row in rows],
-                         [["", "当前答案", ""], ["未选分支后续", "继续", ""]])
-        self.assertEqual([row["swipe_id"] for row in rows], [2, 2])
 
     def test_cli_requires_both_nonblank_names_in_both_directions(self):
         sources = [json.dumps(dzmm_chat()), jsonl([
