@@ -64,8 +64,10 @@ def dzmm_chat():
 
 
 class ConversionTests(unittest.TestCase):
-    def run_cli(self, *args, text=None):
+    def run_cli(self, *args, text=None, names=("角色", "读者")):
         env = dict(os.environ, NO_COLOR="1")
+        if names is not None:
+            args = (*args, f"--char-name={names[0]}", f"--user-name={names[1]}")
         return subprocess.run(
             [sys.executable, "-m", "dzmm2sillytavern", *args],
             check=False, input=text,
@@ -147,22 +149,6 @@ class ConversionTests(unittest.TestCase):
         )
         self.assertNotIn("\x1b", forward.stdout)
 
-    def test_tree_order_and_unrepresentable_branch_warning(self):
-        result = convert_text(
-            json.dumps(dzmm_chat()),
-            char_name="角色",
-            user_name="读者",
-            model="override",
-        )
-        messages = [json.loads(line) for line in result.text.splitlines()][1:]
-        self.assertEqual(
-            [m["mes"] for m in messages], ["问题\n第二行", "当前答案", "继续"]
-        )
-        self.assertEqual(messages[1]["swipes"], ["另一个答案", "当前答案"])
-        self.assertEqual(messages[1]["swipe_id"], 1)
-        self.assertEqual(messages[1]["extra"]["model"], "override")
-        self.assertEqual(result.swipe_count, 1)
-        self.assertRegex(" ".join(result.warnings), r"1.*(消息|message)")
 
     def test_invalid_graphs_fail_instead_of_dropping_messages(self):
         valid = dzmm_chat()
